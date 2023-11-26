@@ -1,11 +1,10 @@
 package memtable
 
 import (
-	"pkvstore/models"
+	"pkvstore/internal/models"
+	"pkvstore/internal/storageengine/configs"
 	"sync"
 )
-
-const MemTableMaxSize = 2
 
 type MemTableEntry struct {
 	Value       string
@@ -70,5 +69,7 @@ func (m *MemTable) Size() int {
 }
 
 func (m *MemTable) ShouldFlush() bool {
-	return m.Size() >= MemTableMaxSize
+	config := configs.GetStorageEngineConfig()
+
+	return m.Size() >= config.MemTableConfig.MaxCapacity
 }

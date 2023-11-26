@@ -2,28 +2,19 @@ package sstable
 
 import (
 	"fmt"
-	"pkvstore/memtable"
-	"pkvstore/models"
+	"pkvstore/internal/models"
+	"pkvstore/internal/storageengine/configs"
+	"pkvstore/internal/storageengine/memtable"
 	"strconv"
 	"time"
 
 	cuckoo "github.com/seiflotfy/cuckoofilter"
 )
 
-const BLOCK_SIZE = 10
-const BlockVERSION = 1
-const SSTableFilterSize = 1000
-const BlockFilterSize = 100
-const FirstLevel = 6
-
-const (
-	Deleted = 1
-)
-
 type SSTableHeader struct {
 	Level     uint8
 	Timestamp int64
-	Version   uint16
+	Version   string
 	BlockSize uint32
 }
 
@@ -50,7 +41,7 @@ type SSTable struct {
 	CuckooFilter *cuckoo.Filter
 }
 
-func NewSSTableHeader(level uint8, version uint16, blockSize uint32) *SSTableHeader {
+func NewSSTableHeader(level uint8, version string, blockSize uint32) *SSTableHeader {
 	return &SSTableHeader{
 		Level:     level,
 		Timestamp: time.Now().Unix(),
@@ -76,15 +67,21 @@ func NewSSTableBlock(sequence int) *SSTableBlock {
 }
 
 func NewSSTable(level uint8) *SSTable {
+
+	configs := configs.GetStorageEngineConfig()
+
 	return &SSTable{
-		Header:       NewSSTableHeader(level, BlockVERSION, BLOCK_SIZE),
+		Header:       NewSSTableHeader(level, configs.SSTableConfig.Version, uint32(configs.SSTableConfig.BlockCapacity)),
 		Blocks:       make([]*SSTableBlock, 0),
-		CuckooFilter: cuckoo.NewFilter(SSTableFilterSize),
+		CuckooFilter: cuckoo.NewFilter(uint(configs.SSTableConfig.FilterCapacity)),
 	}
 }
 
 func CreateSsTableFromMemtable(memTable *memtable.MemTable) *SSTable {
-	sst := NewSSTable(FirstLevel)
+
+	configs := configs.GetStorageEngineConfig()
+
+	sst := NewSSTable(uint8(configs.LSMTreeConfig.FirstLevel))
 
 	for k, v := range memTable.Table {
 		sst.AddEntry(k, v.Value, v.IsTombstone)
@@ -130,6 +127,7 @@ func (s *SSTable) DoesNotExist(key string) bool {
 
 func (s *SSTable) ReadFromSSTable(key string) *models.Result {
 	// TODO: do binary search
+
 	for _, block := range s.Blocks {
 		for _, entry := range block.Entries {
 			if entry.Key == key {

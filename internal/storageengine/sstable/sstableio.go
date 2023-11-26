@@ -93,7 +93,7 @@ func ReadBlock(blockSize uint32, file *os.File) ([]*SSTableEntry, bool, *SSTable
 
 func (sstable *SSTable) WriteToFile(filename string) error {
 
-	file, err := os.Create("./" + SSTABLE_FOLDER + filename)
+	file, err := os.Create("./" + SSTABLE_FOLDER + filename) // todo fix root path
 
 	if err != nil {
 		return err

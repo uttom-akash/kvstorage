@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"pkvstore/lsm"
+	"pkvstore/internal/storageengine/lsmtree"
 	"strconv"
 )
 
 func main() {
-	lsm := lsm.NewLSMTree()
+	lsm := lsmtree.NewLSMTree()
 
 	for i := int64(0); i < 130; i++ {
 		lsm.Put(strconv.FormatInt(i, 10), strconv.FormatInt(i, 10))
