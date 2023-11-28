@@ -1,7 +1,6 @@
 package configs
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -9,17 +8,17 @@ const NUMBER_LEVELS = 7 // sstables: first level = 2^6, last level = 2^0
 
 type StorageEngineConfig struct {
 	LSMTreeConfig struct {
-		SSTableLevels int
-		FirstLevel    int
-		LastLevel     int
+		NumberOfSSTableLevels int
+		FirstLevel            int
+		LastLevel             int
 	}
 
 	SSTableConfig struct {
-		Version             string
-		FirstLevel          int
-		FilterCapacity      int //TODO: dynamic
-		BlockCapacity       int //fixed
-		BlockFilterCapacity int //fixed
+		Version                  string
+		FirstLevel               int
+		FilterFalsePositive      float64 //TODO: dynamic
+		BlockCapacity            int     //fixed
+		BlockFilterFalsePositive float64 //fixed
 	}
 
 	MemTableConfig struct {
@@ -31,15 +30,15 @@ func NewStorageEngineConfig() *StorageEngineConfig {
 
 	config := new(StorageEngineConfig)
 
-	config.LSMTreeConfig.SSTableLevels = NUMBER_LEVELS // sstables: first level = 2^6, last level = 2^0
-	config.LSMTreeConfig.FirstLevel = NUMBER_LEVELS - 1
+	config.LSMTreeConfig.NumberOfSSTableLevels = NUMBER_LEVELS // sstables: first level = 2^6, last level = 2^0
+	config.LSMTreeConfig.FirstLevel = config.LSMTreeConfig.NumberOfSSTableLevels - 1
 	config.LSMTreeConfig.LastLevel = 0
 
 	config.SSTableConfig.Version = "1.0.0"
-	config.SSTableConfig.FirstLevel = NUMBER_LEVELS - 1
-	config.SSTableConfig.FilterCapacity = 1000
-	config.SSTableConfig.BlockCapacity = 10 //256
-	config.SSTableConfig.BlockFilterCapacity = 1000
+	config.SSTableConfig.FirstLevel = config.LSMTreeConfig.FirstLevel
+	config.SSTableConfig.FilterFalsePositive = 0.001        // 1 in 1000
+	config.SSTableConfig.BlockCapacity = 256                //256
+	config.SSTableConfig.BlockFilterFalsePositive = 0.00001 // 1 in 100K
 
 	config.MemTableConfig.MaxCapacity = 3 //4096
 
@@ -56,13 +55,13 @@ func GetStorageEngineConfig() *StorageEngineConfig {
 		defer lock.Unlock()
 
 		if confighandlerInstance == nil {
-			fmt.Println("Creating single instance now.")
+			// fmt.Println("Creating single instance now.")
 			confighandlerInstance = NewStorageEngineConfig()
 		} else {
-			fmt.Println("Single instance already created.")
+			// fmt.Println("Single instance already created.")
 		}
 	} else {
-		fmt.Println("Single instance already created.")
+		// fmt.Println("Single instance already created.")
 	}
 
 	return confighandlerInstance

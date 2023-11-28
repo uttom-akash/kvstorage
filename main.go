@@ -9,7 +9,7 @@ import (
 func main() {
 	lsm := lsmtree.NewLSMTree()
 
-	for i := int64(0); i < 130; i++ {
+	for i := int64(0); i < 100000; i++ {
 		lsm.Put(strconv.FormatInt(i, 10), strconv.FormatInt(i, 10))
 	}
 
@@ -17,8 +17,14 @@ func main() {
 	fmt.Println(lsm.Get("1")) // Output: one
 	fmt.Println(lsm.Get("2")) // Output: two
 	lsm.Delete("3")
-	fmt.Println(lsm.Get("3")) // Output: three
-	fmt.Println(lsm.Get("4")) // Output: <empty string>, false
+	fmt.Println(lsm.Get("3"))   // Output: three
+	fmt.Println(lsm.Get("999")) // Output: <empty string>, false
+
+	fmt.Println(lsm.Get("1")) // Output: one
+	fmt.Println(lsm.Get("2")) // Output: two
+	lsm.Delete("3")
+	fmt.Println(lsm.Get("3"))    // Output: three
+	fmt.Println(lsm.Get("1999")) // Output: <empty string>, false
 
 	// sst := sstable.NewSSTable(1)
 	// sst.AddEntry("1", "one", false)

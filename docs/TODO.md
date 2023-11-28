@@ -1,0 +1,5 @@
+- Replace with bloom filters (fix length for block but think about length for sstable)
+- what about using btree instead of sstable
+- how rocksdb opens hundrade of table at once
+- transaction : keep snapshot of memtable
+- locking issue

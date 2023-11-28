@@ -5,12 +5,14 @@ import (
 	"pkvstore/internal/storageengine/configs"
 	"pkvstore/internal/storageengine/memtable"
 	"pkvstore/internal/storageengine/sstable"
-	"sort"
+	"sync"
 )
 
 type LSMTree struct {
-	memTable  *memtable.MemTable
-	sstTables [][]*sstable.SSTable
+	memTable       *memtable.MemTable
+	sstTables      [][]*sstable.SSTable
+	backgroundChan *SharedChannel
+	mutex          sync.RWMutex
 }
 
 func NewLSMTree() *LSMTree {
@@ -19,27 +21,19 @@ func NewLSMTree() *LSMTree {
 
 	var sstables [][]*sstable.SSTable
 
-	for index := 0; index < config.LSMTreeConfig.SSTableLevels; index++ {
+	for index := 0; index < config.LSMTreeConfig.NumberOfSSTableLevels; index++ {
 		sstables = append(sstables, make([]*sstable.SSTable, 0))
 	}
 
-	return &LSMTree{
-		memTable:  memtable.NewMemTable(),
-		sstTables: sstables,
+	lsmTree := &LSMTree{
+		memTable:       memtable.NewMemTable(),
+		sstTables:      sstables,
+		backgroundChan: NewSharedChannel(),
 	}
-}
 
-func (lsm *LSMTree) Put(key string, value string) {
+	go lsmTree.listenForflush()
 
-	lsm.memTable.Put(key, value)
-
-	if lsm.memTable.ShouldFlush() {
-		oldMemtable := lsm.memTable
-
-		lsm.memTable = memtable.NewMemTable()
-
-		lsm.flushAsSSTable(oldMemtable)
-	}
+	return lsmTree
 }
 
 func (lsm *LSMTree) Get(key string) *models.Result {
@@ -50,14 +44,18 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 		return result
 	}
 
-	for i := len(lsm.sstTables) - 1; i >= 0; i-- {
+	configs := configs.GetStorageEngineConfig()
 
-		for j := len(lsm.sstTables[i]) - 1; j >= 0; j-- {
-			if lsm.sstTables[i][j].DoesNotExist(key) {
+	for level := configs.LSMTreeConfig.FirstLevel; level >= configs.LSMTreeConfig.LastLevel; level-- {
+
+		//read from last since last is the latest
+		for sstableId := len(lsm.sstTables[level]) - 1; sstableId >= 0; sstableId-- {
+			currentSSTable := lsm.sstTables[level][sstableId]
+			if currentSSTable.DoesNotExist(key) {
 				continue
 			}
 
-			result = lsm.sstTables[i][j].ReadFromSSTable(key)
+			result = currentSSTable.ReadFromSSTable(key)
 
 			if result.Status == models.Found || result.Status == models.Deleted {
 				return result
@@ -68,68 +66,36 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 	return models.NewNotFoundResult()
 }
 
-func (lsm *LSMTree) Delete(key string) bool {
+func (lsm *LSMTree) Put(key string, value string) {
+
+	lsm.mutex.Lock()
+	defer lsm.mutex.Unlock()
+
+	lsm.memTable.Put(key, value)
+
+	lsm.CheckAndflushAsSSTable()
+}
+
+func (lsm *LSMTree) Delete(key string) {
+
+	lsm.mutex.Lock()
+	defer lsm.mutex.Unlock()
 
 	lsm.memTable.Delete(key)
 
-	return true
+	lsm.CheckAndflushAsSSTable()
+
 }
 
-// private
+func (lsm *LSMTree) CheckAndflushAsSSTable() {
 
-func (lsm *LSMTree) flushAsSSTable(oldMemtable *memtable.MemTable) {
-
-	sst := sstable.CreateSsTableFromMemtable(oldMemtable)
-
-	lsm.sstTables[sst.Header.Level] = append(lsm.sstTables[sst.Header.Level], sst)
-
-	lsm.doCompaction()
-	//sst.WriteToFile(sst.GetFileName())
-}
-
-func (lsm *LSMTree) doCompaction() {
-
-	for index := 6; index >= 0; index-- {
-		if len(lsm.sstTables[index]) <= 1<<index {
-			break
-		}
-
-		mergedSSTable := mergeSSTables(lsm.sstTables[index])
-
-		if index > 0 {
-			lsm.sstTables[index] = make([]*sstable.SSTable, 0)
-			lsm.sstTables[index-1] = append(lsm.sstTables[index-1], mergedSSTable)
-		} else {
-			lsm.sstTables[index] = []*sstable.SSTable{mergedSSTable}
-		}
-	}
-}
-
-func mergeSSTables(sstables []*sstable.SSTable) *sstable.SSTable {
-
-	keyValues := make(map[string]*sstable.SSTableEntry)
-
-	for i := len(sstables) - 1; i >= 0; i-- {
-		for _, kv := range sstables[i].Blocks[len(sstables[i].Blocks)-1].Entries {
-
-			keyValues[kv.Key] = sstable.NewSSTableEntry(kv.Key, kv.Value, kv.IsTombstone)
-		}
+	if !lsm.memTable.ShouldFlush() {
+		return
 	}
 
-	var mergedData []*sstable.SSTableEntry
-	for _, value := range keyValues {
-		mergedData = append(mergedData, value)
-	}
+	oldMemtable := lsm.memTable
 
-	sort.Slice(mergedData, func(i, j int) bool {
-		return mergedData[i].Key < mergedData[j].Key
-	})
+	lsm.memTable = memtable.NewMemTable()
 
-	sst := sstable.NewSSTable(sstables[0].Header.Level - 1)
-
-	for _, entry := range mergedData {
-		sst.AddEntry(entry.Key, entry.Value, entry.IsTombstone)
-	}
-
-	return sst
+	lsm.backgroundChan.NewMutationEventChannel <- oldMemtable
 }
