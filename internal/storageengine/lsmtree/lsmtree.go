@@ -5,59 +5,53 @@ import (
 	"pkvstore/internal/storageengine/configs"
 	"pkvstore/internal/storageengine/memtable"
 	"pkvstore/internal/storageengine/sstable"
-	"sort"
 )
 
 type LSMTree struct {
-	memTable  *memtable.MemTable
-	sstTables [][]*sstable.SSTable
+	MemTable *memtable.MemTable
+	SSTables [][]*sstable.SSTable
 }
 
 func NewLSMTree() *LSMTree {
-
 	config := configs.GetStorageEngineConfig()
 
-	var sstables [][]*sstable.SSTable
+	sstables := make([][]*sstable.SSTable, config.LSMTreeConfig.NumberOfSSTableLevels)
 
-	for index := 0; index < config.LSMTreeConfig.SSTableLevels; index++ {
-		sstables = append(sstables, make([]*sstable.SSTable, 0))
+	lsmTree := &LSMTree{
+		MemTable: memtable.NewMemTable(),
+		SSTables: sstables,
 	}
 
-	return &LSMTree{
-		memTable:  memtable.NewMemTable(),
-		sstTables: sstables,
-	}
-}
-
-func (lsm *LSMTree) Put(key string, value string) {
-
-	lsm.memTable.Put(key, value)
-
-	if lsm.memTable.ShouldFlush() {
-		oldMemtable := lsm.memTable
-
-		lsm.memTable = memtable.NewMemTable()
-
-		lsm.flushAsSSTable(oldMemtable)
-	}
+	return lsmTree
 }
 
 func (lsm *LSMTree) Get(key string) *models.Result {
 
-	result := lsm.memTable.Get(key)
+	// complexity
+	// level = 6
+	// total 63 sstables
+	// last level = 10^9 keys
+	// block cap = 2048
+	// blocks = 10^5
+	// so overall compelxity = binary search - log2(10^5)
+
+	result := lsm.MemTable.Get(key)
 
 	if result.Status == models.Found || result.Status == models.Deleted {
 		return result
 	}
 
-	for i := len(lsm.sstTables) - 1; i >= 0; i-- {
+	config := configs.GetStorageEngineConfig()
 
-		for j := len(lsm.sstTables[i]) - 1; j >= 0; j-- {
-			if lsm.sstTables[i][j].DoesNotExist(key) {
+	for level := config.LSMTreeConfig.FirstLevel; level >= config.LSMTreeConfig.LastLevel; level-- {
+		for sstableId := len(lsm.SSTables[level]) - 1; sstableId >= 0; sstableId-- {
+			currentSSTable := lsm.SSTables[level][sstableId]
+
+			if currentSSTable.DoesNotExist(key) {
 				continue
 			}
 
-			result = lsm.sstTables[i][j].ReadFromSSTable(key)
+			result = currentSSTable.ReadFromSSTable(key)
 
 			if result.Status == models.Found || result.Status == models.Deleted {
 				return result
@@ -68,68 +62,10 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 	return models.NewNotFoundResult()
 }
 
-func (lsm *LSMTree) Delete(key string) bool {
-
-	lsm.memTable.Delete(key)
-
-	return true
+func (lsm *LSMTree) Put(key, value string) {
+	lsm.MemTable.Put(key, value)
 }
 
-// private
-
-func (lsm *LSMTree) flushAsSSTable(oldMemtable *memtable.MemTable) {
-
-	sst := sstable.CreateSsTableFromMemtable(oldMemtable)
-
-	lsm.sstTables[sst.Header.Level] = append(lsm.sstTables[sst.Header.Level], sst)
-
-	lsm.doCompaction()
-	//sst.WriteToFile(sst.GetFileName())
-}
-
-func (lsm *LSMTree) doCompaction() {
-
-	for index := 6; index >= 0; index-- {
-		if len(lsm.sstTables[index]) <= 1<<index {
-			break
-		}
-
-		mergedSSTable := mergeSSTables(lsm.sstTables[index])
-
-		if index > 0 {
-			lsm.sstTables[index] = make([]*sstable.SSTable, 0)
-			lsm.sstTables[index-1] = append(lsm.sstTables[index-1], mergedSSTable)
-		} else {
-			lsm.sstTables[index] = []*sstable.SSTable{mergedSSTable}
-		}
-	}
-}
-
-func mergeSSTables(sstables []*sstable.SSTable) *sstable.SSTable {
-
-	keyValues := make(map[string]*sstable.SSTableEntry)
-
-	for i := len(sstables) - 1; i >= 0; i-- {
-		for _, kv := range sstables[i].Blocks[len(sstables[i].Blocks)-1].Entries {
-
-			keyValues[kv.Key] = sstable.NewSSTableEntry(kv.Key, kv.Value, kv.IsTombstone)
-		}
-	}
-
-	var mergedData []*sstable.SSTableEntry
-	for _, value := range keyValues {
-		mergedData = append(mergedData, value)
-	}
-
-	sort.Slice(mergedData, func(i, j int) bool {
-		return mergedData[i].Key < mergedData[j].Key
-	})
-
-	sst := sstable.NewSSTable(sstables[0].Header.Level - 1)
-
-	for _, entry := range mergedData {
-		sst.AddEntry(entry.Key, entry.Value, entry.IsTombstone)
-	}
-
-	return sst
+func (lsm *LSMTree) Delete(key string) {
+	lsm.MemTable.Delete(key)
 }

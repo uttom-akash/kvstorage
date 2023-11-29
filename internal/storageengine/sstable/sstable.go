@@ -1,55 +1,62 @@
 package sstable
 
 import (
-	"fmt"
+	"pkvstore/internal/core"
 	"pkvstore/internal/models"
 	"pkvstore/internal/storageengine/configs"
-	"pkvstore/internal/storageengine/memtable"
 	"strconv"
 	"time"
-
-	cuckoo "github.com/seiflotfy/cuckoofilter"
 )
 
+// SSTableHeader represents the header of an SSTable.
 type SSTableHeader struct {
-	Level     uint8
-	Timestamp int64
-	Version   string
-	BlockSize uint32
+	Level         uint8
+	Timestamp     int64
+	Version       string
+	BlockSize     uint32
+	NumberEntries uint
 }
 
+// SSTableEntry represents an entry in an SSTable.
 type SSTableEntry struct {
 	Key         string
 	Value       string
 	IsTombstone bool
 }
 
+// SSTableBlock represents a block in an SSTable.
 type SSTableBlock struct {
-	sequence     int
-	Entries      []*SSTableEntry
-	CuckooFilter *cuckoo.Filter
+	sequence int
+	Anchor   *SSTableEntry
+	Entries  []*SSTableEntry
+	Filter   *core.BloomFilter
 }
 
+// SSTableFooter represents the footer of an SSTable.
 type SSTableFooter struct {
 	Checksum uint32
 }
 
+// SSTable represents a sorted string table.
 type SSTable struct {
-	Header       *SSTableHeader
-	Blocks       []*SSTableBlock
-	Footer       *SSTableFooter
-	CuckooFilter *cuckoo.Filter
+	Header *SSTableHeader
+	Blocks []*SSTableBlock
+	Footer *SSTableFooter
+	Filter *core.BloomFilter
 }
 
-func NewSSTableHeader(level uint8, version string, blockSize uint32) *SSTableHeader {
+// newSSTableHeader creates a new SSTableHeader.
+func newSSTableHeader(level uint8, version string, blockSize uint32, numberEntries uint) *SSTableHeader {
 	return &SSTableHeader{
-		Level:     level,
-		Timestamp: time.Now().Unix(),
-		Version:   version,
-		BlockSize: blockSize,
+		Level:         level,
+		Timestamp:     time.Now().Unix(),
+		Version:       version,
+		BlockSize:     blockSize,
+		NumberEntries: numberEntries,
 	}
 }
 
+// NewSSTableEntry creates a new SSTableEntry.
 func NewSSTableEntry(key string, value string, isTombstone bool) *SSTableEntry {
 	return &SSTableEntry{
 		Key:         key,
@@ -58,40 +65,48 @@ func NewSSTableEntry(key string, value string, isTombstone bool) *SSTableEntry {
 	}
 }
 
-func NewSSTableBlock(sequence int) *SSTableBlock {
+// newSSTableBlock creates a new SSTableBlock.
+func newSSTableBlock(sequence int) *SSTableBlock {
+	configs := configs.GetStorageEngineConfig()
+
 	return &SSTableBlock{
-		sequence:     sequence,
-		Entries:      make([]*SSTableEntry, 0),
-		CuckooFilter: cuckoo.NewFilter(1000), // Adjust the capacity as needed
+		sequence: sequence,
+		Entries:  make([]*SSTableEntry, 0),
+		Filter:   core.NewBloomFilter(uint(configs.SSTableConfig.BlockCapacity), configs.SSTableConfig.BlockFilterFalsePositive, "optimal"),
 	}
 }
 
-func NewSSTable(level uint8) *SSTable {
+func (sstblock *SSTableBlock) addEntry(entry *SSTableEntry) {
+	if len(sstblock.Entries) == 0 {
+		sstblock.Anchor = entry
+	}
+	sstblock.Entries = append(sstblock.Entries, entry)
+}
 
+// newSSTable creates a new SSTable.
+func newSSTable(level uint8, numberOfEntries uint) *SSTable {
 	configs := configs.GetStorageEngineConfig()
 
 	return &SSTable{
-		Header:       NewSSTableHeader(level, configs.SSTableConfig.Version, uint32(configs.SSTableConfig.BlockCapacity)),
-		Blocks:       make([]*SSTableBlock, 0),
-		CuckooFilter: cuckoo.NewFilter(uint(configs.SSTableConfig.FilterCapacity)),
+		Header: newSSTableHeader(level, configs.SSTableConfig.Version, uint32(configs.SSTableConfig.BlockCapacity), numberOfEntries),
+		Blocks: make([]*SSTableBlock, 0),
+		Filter: core.NewBloomFilter(numberOfEntries, configs.SSTableConfig.FilterFalsePositive, "optimal"),
 	}
 }
 
-func CreateSsTableFromMemtable(memTable *memtable.MemTable) *SSTable {
+// CreateSSTable creates an SSTable from SSTableEntries.
+func CreateSSTable(sstableEntries []*SSTableEntry, level uint8) *SSTable {
+	newSSTable := newSSTable(level, uint(len(sstableEntries)))
 
-	configs := configs.GetStorageEngineConfig()
-
-	sst := NewSSTable(uint8(configs.LSMTreeConfig.FirstLevel))
-
-	for k, v := range memTable.Table {
-		sst.AddEntry(k, v.Value, v.IsTombstone)
+	for _, sstableEntry := range sstableEntries {
+		newSSTable.addEntry(sstableEntry)
 	}
 
-	return sst
+	return newSSTable
 }
 
-func (sstable *SSTable) AddEntry(key string, value string, isTobstone bool) {
-
+// addEntry adds an entry to the SSTable.
+func (sstable *SSTable) addEntry(newSSTableEntry *SSTableEntry) {
 	numberOfBlocks := len(sstable.Blocks)
 
 	shouldCreateNewBlock := len(sstable.Blocks) == 0 || len(sstable.Blocks[len(sstable.Blocks)-1].Entries) >= int(sstable.Header.BlockSize)
@@ -99,51 +114,75 @@ func (sstable *SSTable) AddEntry(key string, value string, isTobstone bool) {
 	var lastBlock *SSTableBlock
 
 	if shouldCreateNewBlock {
-
 		sequence := numberOfBlocks + 1
-
-		lastBlock = NewSSTableBlock(sequence)
-
+		lastBlock = newSSTableBlock(sequence)
 		sstable.Blocks = append(sstable.Blocks, lastBlock)
-
 	} else {
-
 		lastBlock = sstable.Blocks[len(sstable.Blocks)-1]
-
 	}
 
-	newSSTableEntry := NewSSTableEntry(key, value, isTobstone)
-
-	lastBlock.Entries = append(lastBlock.Entries, newSSTableEntry)
-
-	lastBlock.CuckooFilter.InsertUnique([]byte(fmt.Sprint(key)))
-
-	sstable.CuckooFilter.InsertUnique([]byte(fmt.Sprint(key)))
+	lastBlock.addEntry(newSSTableEntry)
+	lastBlock.Filter.Add([]byte(newSSTableEntry.Key))
+	sstable.Filter.Add([]byte(newSSTableEntry.Key))
 }
 
+// DoesNotExist checks if a key does not exist in the SSTable.
 func (s *SSTable) DoesNotExist(key string) bool {
-	return !s.CuckooFilter.Lookup([]byte(key))
+	return s.Filter.DoesNotExist([]byte(key))
 }
 
+// ReadFromSSTable reads a key from the SSTable.
 func (s *SSTable) ReadFromSSTable(key string) *models.Result {
-	// TODO: do binary search
 
-	for _, block := range s.Blocks {
-		for _, entry := range block.Entries {
-			if entry.Key == key {
+	lastSmallerOrEqualBlock := s.getLastSmallerBlock(key)
 
-				if entry.IsTombstone {
-					return models.NewDeletedResult()
-				}
+	if lastSmallerOrEqualBlock == nil || lastSmallerOrEqualBlock.Filter.DoesNotExist([]byte(key)) {
+		return models.NewNotFoundResult()
+	}
 
-				return models.NewFoundResult(entry.Value)
+	for _, entry := range lastSmallerOrEqualBlock.Entries {
+		if entry.Key == key {
+			if entry.IsTombstone {
+				return models.NewDeletedResult()
 			}
+			return models.NewFoundResult(entry.Value)
 		}
 	}
 
 	return models.NewNotFoundResult()
 }
 
+// similar to lower_bound implementation in c++
+// lower_bound returns equal or greater than key
+// this func return equal or smaller than key
+func (s *SSTable) getLastSmallerBlock(key string) *SSTableBlock {
+
+	low, high := 0, len(s.Blocks)-1
+
+	var lastSmallerOrEqualBlock *SSTableBlock
+
+	for low <= high {
+
+		mid := (low + high) / 2
+
+		block := s.Blocks[mid]
+
+		if block.Anchor.Key <= key {
+
+			lastSmallerOrEqualBlock = block
+
+			low = mid + 1
+
+		} else {
+
+			high = mid - 1
+		}
+	}
+
+	return lastSmallerOrEqualBlock
+}
+
+// GetFileName returns the file name of the SSTable.
 func (sst *SSTable) GetFileName() string {
 	return strconv.FormatInt(int64(int(sst.Header.Level)), 10) + "-" + strconv.FormatInt(sst.Header.Timestamp, 10)
 }

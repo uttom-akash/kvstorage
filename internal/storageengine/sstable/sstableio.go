@@ -4,8 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-
-	cuckoo "github.com/seiflotfy/cuckoofilter"
+	"pkvstore/internal/core"
 )
 
 const SSTABLE_FOLDER = "/storage/sstable/"
@@ -28,7 +27,7 @@ func LoadFromFile(filename string) (*SSTable, error) {
 
 	// Read blocks
 	blocks := make([]*SSTableBlock, 0)
-	tableFilter := cuckoo.NewFilter(1000)
+	tableFilter := core.NewBloomFilter(10000, 0.01, "optimal")
 	for {
 		var blockSize uint32
 
@@ -42,15 +41,15 @@ func LoadFromFile(filename string) (*SSTable, error) {
 		}
 
 		// Create a Cuckoo Filter and populate it
-		cuckooFilter := cuckoo.NewFilter(1000) // Adjust the capacity as needed
+		blockfilter := core.NewBloomFilter(10000, 0.01, "optimal") // Adjust the capacity as needed
 		for _, entry := range entries {
-			cuckooFilter.InsertUnique([]byte(fmt.Sprint(entry.Key)))
-			tableFilter.InsertUnique([]byte(fmt.Sprint(entry.Key)))
+			blockfilter.Add([]byte(fmt.Sprint(entry.Key)))
+			tableFilter.Add([]byte(fmt.Sprint(entry.Key)))
 		}
 
 		blocks = append(blocks, &SSTableBlock{
-			Entries:      entries,
-			CuckooFilter: cuckooFilter,
+			Entries: entries,
+			Filter:  blockfilter,
 		})
 	}
 
@@ -61,10 +60,10 @@ func LoadFromFile(filename string) (*SSTable, error) {
 	}
 
 	return &SSTable{
-		Header:       &header,
-		Blocks:       blocks,
-		Footer:       &footer,
-		CuckooFilter: tableFilter,
+		Header: &header,
+		Blocks: blocks,
+		Footer: &footer,
+		Filter: tableFilter,
 	}, nil
 }
 
