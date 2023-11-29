@@ -36,11 +36,11 @@ func NewStorageEngineConfig() *StorageEngineConfig {
 
 	config.SSTableConfig.Version = "1.0.0"
 	config.SSTableConfig.FirstLevel = config.LSMTreeConfig.FirstLevel
-	config.SSTableConfig.FilterFalsePositive = 0.001        // 1 in 1000
-	config.SSTableConfig.BlockCapacity = 256                //256
-	config.SSTableConfig.BlockFilterFalsePositive = 0.00001 // 1 in 100K
+	config.SSTableConfig.FilterFalsePositive = 0.1        // 1 in 10, 500MB, hash function 3 for 10^9 keys
+	config.SSTableConfig.BlockCapacity = 2048             //2048
+	config.SSTableConfig.BlockFilterFalsePositive = 0.001 // 1 in 1000, 3.59KiB, hash function 10
 
-	config.MemTableConfig.MaxCapacity = 3 //4096
+	config.MemTableConfig.MaxCapacity = 16384 //4096
 
 	return config
 }

@@ -2,16 +2,14 @@ package lsmtree
 
 import (
 	"pkvstore/internal/models"
-	"pkvstore/internal/storageengine/channels"
 	"pkvstore/internal/storageengine/configs"
 	"pkvstore/internal/storageengine/memtable"
 	"pkvstore/internal/storageengine/sstable"
 )
 
 type LSMTree struct {
-	MemTable   *memtable.MemTable
-	SSTables   [][]*sstable.SSTable
-	sharedChan *channels.SharedChannel
+	MemTable *memtable.MemTable
+	SSTables [][]*sstable.SSTable
 }
 
 func NewLSMTree() *LSMTree {
@@ -20,15 +18,23 @@ func NewLSMTree() *LSMTree {
 	sstables := make([][]*sstable.SSTable, config.LSMTreeConfig.NumberOfSSTableLevels)
 
 	lsmTree := &LSMTree{
-		MemTable:   memtable.NewMemTable(),
-		SSTables:   sstables,
-		sharedChan: channels.GetSharedChannel(),
+		MemTable: memtable.NewMemTable(),
+		SSTables: sstables,
 	}
 
 	return lsmTree
 }
 
 func (lsm *LSMTree) Get(key string) *models.Result {
+
+	// complexity
+	// level = 6
+	// total 63 sstables
+	// last level = 10^9 keys
+	// block cap = 2048
+	// blocks = 10^5
+	// so overall compelxity = binary search - log2(10^5)
+
 	result := lsm.MemTable.Get(key)
 
 	if result.Status == models.Found || result.Status == models.Deleted {
@@ -58,15 +64,8 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 
 func (lsm *LSMTree) Put(key, value string) {
 	lsm.MemTable.Put(key, value)
-	lsm.notifyNewMutation()
 }
 
 func (lsm *LSMTree) Delete(key string) {
 	lsm.MemTable.Delete(key)
-	lsm.notifyNewMutation()
-}
-
-func (lsm *LSMTree) notifyNewMutation() {
-
-	lsm.sharedChan.NewMutationEventChannel <- 1
 }
