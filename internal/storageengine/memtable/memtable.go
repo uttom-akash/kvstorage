@@ -24,10 +24,22 @@ type MemTable struct {
 	mutex sync.RWMutex
 }
 
+type FlushableMemTable struct {
+	Table map[string]*MemTableEntry
+	size  uint32
+}
+
 func NewMemTable() *MemTable {
 	return &MemTable{
 		Table: make(map[string]*MemTableEntry),
 		size:  0,
+	}
+}
+
+func NewFlushableMemTable(table map[string]*MemTableEntry, size uint32) *FlushableMemTable {
+	return &FlushableMemTable{
+		Table: table,
+		size:  size,
 	}
 }
 
@@ -72,4 +84,16 @@ func (m *MemTable) ShouldFlush() bool {
 	config := configs.GetStorageEngineConfig()
 
 	return m.Size() >= config.MemTableConfig.MaxCapacity
+}
+
+func (m *MemTable) ReplaceNewTable() *FlushableMemTable {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	oldTable := NewFlushableMemTable(m.Table, m.size)
+
+	m.Table = make(map[string]*MemTableEntry)
+	m.size = 0
+
+	return oldTable
 }

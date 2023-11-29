@@ -15,14 +15,9 @@ type LSMTree struct {
 }
 
 func NewLSMTree() *LSMTree {
-
 	config := configs.GetStorageEngineConfig()
 
-	var sstables [][]*sstable.SSTable
-
-	for index := 0; index < config.LSMTreeConfig.NumberOfSSTableLevels; index++ {
-		sstables = append(sstables, make([]*sstable.SSTable, 0))
-	}
+	sstables := make([][]*sstable.SSTable, config.LSMTreeConfig.NumberOfSSTableLevels)
 
 	lsmTree := &LSMTree{
 		MemTable:   memtable.NewMemTable(),
@@ -34,22 +29,18 @@ func NewLSMTree() *LSMTree {
 }
 
 func (lsm *LSMTree) Get(key string) *models.Result {
-
-	//check memtable
 	result := lsm.MemTable.Get(key)
 
 	if result.Status == models.Found || result.Status == models.Deleted {
 		return result
 	}
 
-	configs := configs.GetStorageEngineConfig()
+	config := configs.GetStorageEngineConfig()
 
-	//check sstable
-	for level := configs.LSMTreeConfig.FirstLevel; level >= configs.LSMTreeConfig.LastLevel; level-- {
-
-		//read from last since last is the latest
+	for level := config.LSMTreeConfig.FirstLevel; level >= config.LSMTreeConfig.LastLevel; level-- {
 		for sstableId := len(lsm.SSTables[level]) - 1; sstableId >= 0; sstableId-- {
 			currentSSTable := lsm.SSTables[level][sstableId]
+
 			if currentSSTable.DoesNotExist(key) {
 				continue
 			}
@@ -65,17 +56,13 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 	return models.NewNotFoundResult()
 }
 
-func (lsm *LSMTree) Put(key string, value string) {
-
+func (lsm *LSMTree) Put(key, value string) {
 	lsm.MemTable.Put(key, value)
-
 	lsm.notifyNewMutation()
 }
 
 func (lsm *LSMTree) Delete(key string) {
-
 	lsm.MemTable.Delete(key)
-
 	lsm.notifyNewMutation()
 }
 
