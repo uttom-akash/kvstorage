@@ -2,17 +2,16 @@ package lsmtree
 
 import (
 	"pkvstore/internal/models"
+	"pkvstore/internal/storageengine/channels"
 	"pkvstore/internal/storageengine/configs"
 	"pkvstore/internal/storageengine/memtable"
 	"pkvstore/internal/storageengine/sstable"
-	"sync"
 )
 
 type LSMTree struct {
-	memTable       *memtable.MemTable
-	sstTables      [][]*sstable.SSTable
-	backgroundChan *SharedChannel
-	mutex          sync.RWMutex
+	MemTable   *memtable.MemTable
+	SSTables   [][]*sstable.SSTable
+	sharedChan *channels.SharedChannel
 }
 
 func NewLSMTree() *LSMTree {
@@ -26,19 +25,18 @@ func NewLSMTree() *LSMTree {
 	}
 
 	lsmTree := &LSMTree{
-		memTable:       memtable.NewMemTable(),
-		sstTables:      sstables,
-		backgroundChan: NewSharedChannel(),
+		MemTable:   memtable.NewMemTable(),
+		SSTables:   sstables,
+		sharedChan: channels.GetSharedChannel(),
 	}
-
-	go lsmTree.listenForflush()
 
 	return lsmTree
 }
 
 func (lsm *LSMTree) Get(key string) *models.Result {
 
-	result := lsm.memTable.Get(key)
+	//check memtable
+	result := lsm.MemTable.Get(key)
 
 	if result.Status == models.Found || result.Status == models.Deleted {
 		return result
@@ -46,11 +44,12 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 
 	configs := configs.GetStorageEngineConfig()
 
+	//check sstable
 	for level := configs.LSMTreeConfig.FirstLevel; level >= configs.LSMTreeConfig.LastLevel; level-- {
 
 		//read from last since last is the latest
-		for sstableId := len(lsm.sstTables[level]) - 1; sstableId >= 0; sstableId-- {
-			currentSSTable := lsm.sstTables[level][sstableId]
+		for sstableId := len(lsm.SSTables[level]) - 1; sstableId >= 0; sstableId-- {
+			currentSSTable := lsm.SSTables[level][sstableId]
 			if currentSSTable.DoesNotExist(key) {
 				continue
 			}
@@ -68,34 +67,19 @@ func (lsm *LSMTree) Get(key string) *models.Result {
 
 func (lsm *LSMTree) Put(key string, value string) {
 
-	lsm.mutex.Lock()
-	defer lsm.mutex.Unlock()
+	lsm.MemTable.Put(key, value)
 
-	lsm.memTable.Put(key, value)
-
-	lsm.CheckAndflushAsSSTable()
+	lsm.notifyNewMutation()
 }
 
 func (lsm *LSMTree) Delete(key string) {
 
-	lsm.mutex.Lock()
-	defer lsm.mutex.Unlock()
+	lsm.MemTable.Delete(key)
 
-	lsm.memTable.Delete(key)
-
-	lsm.CheckAndflushAsSSTable()
-
+	lsm.notifyNewMutation()
 }
 
-func (lsm *LSMTree) CheckAndflushAsSSTable() {
+func (lsm *LSMTree) notifyNewMutation() {
 
-	if !lsm.memTable.ShouldFlush() {
-		return
-	}
-
-	oldMemtable := lsm.memTable
-
-	lsm.memTable = memtable.NewMemTable()
-
-	lsm.backgroundChan.NewMutationEventChannel <- oldMemtable
+	lsm.sharedChan.NewMutationEventChannel <- 1
 }
