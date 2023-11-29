@@ -40,12 +40,13 @@ type SSTable struct {
 	Filter *core.BloomFilter
 }
 
-func newSSTableHeader(level uint8, version string, blockSize uint32) *SSTableHeader {
+func newSSTableHeader(level uint8, version string, blockSize uint32, numberEntries uint) *SSTableHeader {
 	return &SSTableHeader{
-		Level:     level,
-		Timestamp: time.Now().Unix(),
-		Version:   version,
-		BlockSize: blockSize,
+		Level:         level,
+		Timestamp:     time.Now().Unix(),
+		Version:       version,
+		BlockSize:     blockSize,
+		NumberEntries: numberEntries,
 	}
 }
 
@@ -80,7 +81,7 @@ func newSSTable(level uint8, numberOfEntries uint) *SSTable {
 	configs := configs.GetStorageEngineConfig()
 
 	return &SSTable{
-		Header: newSSTableHeader(level, configs.SSTableConfig.Version, uint32(configs.SSTableConfig.BlockCapacity)),
+		Header: newSSTableHeader(level, configs.SSTableConfig.Version, uint32(configs.SSTableConfig.BlockCapacity), numberOfEntries),
 		Blocks: make([]*SSTableBlock, 0),
 		Filter: core.NewBloomFilter(numberOfEntries, configs.SSTableConfig.FilterFalsePositive, "optimal"),
 	}
