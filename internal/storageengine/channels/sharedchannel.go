@@ -4,11 +4,17 @@ import "sync"
 
 type SharedChannel struct {
 	NewMutationEventChannel chan int
+	SwitchMemtableEvent     chan int
+	FlushMemtableEvent      chan int
+	CompactionEvent         chan int
 }
 
 func newSharedChannel() *SharedChannel {
 	return &SharedChannel{
 		NewMutationEventChannel: make(chan int, 10000),
+		SwitchMemtableEvent:     make(chan int, 10000),
+		FlushMemtableEvent:      make(chan int, 100),
+		CompactionEvent:         make(chan int, 10),
 	}
 }
 

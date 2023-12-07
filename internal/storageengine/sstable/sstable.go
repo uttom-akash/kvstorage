@@ -15,6 +15,7 @@ type SSTableHeader struct {
 	Version       string
 	BlockSize     uint32
 	NumberEntries uint
+	sealed        bool
 }
 
 // SSTableEntry represents an entry in an SSTable.
@@ -26,7 +27,7 @@ type SSTableEntry struct {
 
 // SSTableBlock represents a block in an SSTable.
 type SSTableBlock struct {
-	sequence int
+	Sequence int
 	Anchor   *SSTableEntry
 	Entries  []*SSTableEntry
 	Filter   *core.BloomFilter
@@ -53,6 +54,7 @@ func newSSTableHeader(level uint8, version string, blockSize uint32, numberEntri
 		Version:       version,
 		BlockSize:     blockSize,
 		NumberEntries: numberEntries,
+		sealed:        false,
 	}
 }
 
@@ -70,7 +72,7 @@ func newSSTableBlock(sequence int) *SSTableBlock {
 	configs := configs.GetStorageEngineConfig()
 
 	return &SSTableBlock{
-		sequence: sequence,
+		Sequence: sequence,
 		Entries:  make([]*SSTableEntry, 0),
 		Filter:   core.NewBloomFilter(uint(configs.SSTableConfig.BlockCapacity), configs.SSTableConfig.BlockFilterFalsePositive, "optimal"),
 	}
@@ -93,6 +95,32 @@ func newSSTable(level uint8, numberOfEntries uint) *SSTable {
 		Filter: core.NewBloomFilter(numberOfEntries, configs.SSTableConfig.FilterFalsePositive, "optimal"),
 	}
 }
+
+// region
+func OpenSSTable(level uint8, NumberEntries uint) *SSTable {
+	configs := configs.GetStorageEngineConfig()
+	return &SSTable{
+		Header: newSSTableHeader(level, configs.SSTableConfig.Version, uint32(configs.SSTableConfig.BlockCapacity), 0),
+		Blocks: make([]*SSTableBlock, 0),
+		Filter: core.NewBloomFilter(NumberEntries/10, configs.SSTableConfig.FilterFalsePositive, "optimal"),
+	}
+}
+
+func (sstable *SSTable) AddEntry(newSSTableEntry *SSTableEntry) {
+	if sstable.Header.sealed {
+		return
+	}
+
+	sstable.Header.NumberEntries += 1
+	sstable.addEntry(newSSTableEntry)
+}
+
+func (sstable *SSTable) CompleteSSTableCreation() *SSTable {
+	sstable.Header.sealed = true
+	return sstable
+}
+
+//end region
 
 // CreateSSTable creates an SSTable from SSTableEntries.
 func CreateSSTable(sstableEntries []*SSTableEntry, level uint8) *SSTable {

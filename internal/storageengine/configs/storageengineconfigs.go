@@ -40,7 +40,7 @@ func NewStorageEngineConfig() *StorageEngineConfig {
 	config.SSTableConfig.BlockCapacity = 2048             //2048
 	config.SSTableConfig.BlockFilterFalsePositive = 0.001 // 1 in 1000, 3.59KiB, hash function 10
 
-	config.MemTableConfig.MaxCapacity = 16384 //4096
+	config.MemTableConfig.MaxCapacity = 2 //4096
 
 	return config
 }
