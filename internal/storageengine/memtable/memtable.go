@@ -1,7 +1,9 @@
 package memtable
 
 import (
+	"os"
 	"pkvstore/internal/models"
+	"pkvstore/internal/storageengine/channels"
 	"pkvstore/internal/storageengine/configs"
 	"sync"
 )
@@ -19,35 +21,26 @@ func NewMemTableEntry(value string) *MemTableEntry {
 }
 
 type MemTable struct {
-	Table map[string]*MemTableEntry
-	size  uint32
-	mutex sync.RWMutex
-}
-
-type FlushableMemTable struct {
-	Table map[string]*MemTableEntry
-	size  uint32
+	Table         map[string]*MemTableEntry
+	ReadOnlyTable map[string]*MemTableEntry
+	size          uint32
+	mutex         sync.RWMutex
+	sharedChannel *channels.SharedChannel
 }
 
 func NewMemTable() *MemTable {
-	return &MemTable{
-		Table: make(map[string]*MemTableEntry),
-		size:  0,
+	m := &MemTable{
+		Table:         make(map[string]*MemTableEntry),
+		ReadOnlyTable: nil,
+		size:          0,
+		sharedChannel: channels.GetSharedChannel(),
 	}
-}
 
-func NewFlushableMemTable(table map[string]*MemTableEntry, size uint32) *FlushableMemTable {
-	return &FlushableMemTable{
-		Table: table,
-		size:  size,
-	}
-}
+	var wg sync.WaitGroup
 
-func (m *MemTable) Put(key string, value string) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	go m.ListenSwitchTableEvent(&wg)
 
-	m.Table[key] = NewMemTableEntry(value)
+	return m
 }
 
 func (m *MemTable) Get(key string) *models.Result {
@@ -66,6 +59,13 @@ func (m *MemTable) Get(key string) *models.Result {
 	return models.NewNotFoundResult()
 }
 
+func (m *MemTable) Put(key string, value string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.Table[key] = NewMemTableEntry(value)
+}
+
 func (m *MemTable) Delete(key string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -75,25 +75,41 @@ func (m *MemTable) Delete(key string) {
 }
 
 func (m *MemTable) Size() int {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
 	return len(m.Table)
 }
 
-func (m *MemTable) ShouldFlush() bool {
+func (m *MemTable) ListenSwitchTableEvent(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	exitSignal := make(chan os.Signal, 1)
+
 	config := configs.GetStorageEngineConfig()
 
-	return m.Size() >= config.MemTableConfig.MaxCapacity
+	for {
+		select {
+		case switchevent := <-m.sharedChannel.SwitchMemtableEvent:
+			if switchevent < 0 || m.Size() < config.MemTableConfig.MaxCapacity || m.ReadOnlyTable != nil {
+				continue
+			}
+
+			m.swtichMemtable()
+
+			m.sharedChannel.FlushMemtableEvent <- 1
+		case <-exitSignal:
+			return
+		}
+	}
 }
 
-func (m *MemTable) ReplaceNewTable() *FlushableMemTable {
+func (m *MemTable) swtichMemtable() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	oldTable := NewFlushableMemTable(m.Table, m.size)
-
+	m.ReadOnlyTable = m.Table
 	m.Table = make(map[string]*MemTableEntry)
-	m.size = 0
+}
 
-	return oldTable
+func (m *MemTable) ClearReadOnlyMemtable() {
+	m.ReadOnlyTable = nil
 }

@@ -16,7 +16,6 @@ type Store struct {
 func NewStore() *Store {
 	lsm := lsmtree.NewLSMTree()
 	compaction := backgroundprocess.NewCompaction(lsm)
-	go compaction.ListenToCompact()
 
 	return &Store{
 		lsmTree:    lsm,
@@ -50,7 +49,7 @@ func (store *Store) Delete(key string) {
 
 func (store *Store) notifyWriteOperation() {
 
-	store.sharedChan.NewMutationEventChannel <- 1
+	store.sharedChan.SwitchMemtableEvent <- 1
 }
 
 func (store *Store) notifyReadOperation() {

@@ -1,5 +1,8 @@
+- Invoke cmd to access in memory db
 - Replace with bloom filters (fix length for block but think about length for sstable)
 - what about using btree instead of sstable
 - how rocksdb opens hundrade of table at once
 - transaction : keep snapshot of memtable
 - locking issue
+- merge sorts while doing compaction
+- don't make large arrary or map while doing compaction
