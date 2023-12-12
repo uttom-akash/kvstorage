@@ -10,21 +10,6 @@ import (
 	"time"
 )
 
-func generateAndPutData(current int, lsm *store.Store, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	var key string
-
-	for i := int64(0); i < 10; i++ {
-		randomNumber := rand.Int63n(1<<63 - 1)
-		key = strconv.FormatInt(randomNumber, 10)
-		value := strconv.FormatInt(randomNumber, 10)
-
-		lsm.Put(key, value)
-	}
-	fmt.Printf("Goroutine %d completed\n", current)
-}
-
 func main() {
 	// Start profiling server
 	// go func() {
@@ -32,16 +17,7 @@ func main() {
 	// }()
 
 	store := store.NewStore()
-	// store.Put("name", "akash")
 
-	// for i := int64(0); i < 2; i++ {
-	// 	// randomNumber := rand.Int63n(1<<63 - 1)
-	// 	// key := strconv.FormatInt(randomNumber, 10)
-	// 	// value := strconv.FormatInt(randomNumber, 10)
-
-	// 	store.Put("name", "akash")
-	// 	store.Put("address", "dhanmandi")
-	// }
 	store.Put("name1", "akash")
 
 	store.Put("address1", "dhanmandi")
@@ -58,6 +34,21 @@ func main() {
 
 	fmt.Println("name: ", store.Get("name")) // Output: one
 
+}
+
+func generateAndPutData(current int, lsm *store.Store, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	var key string
+
+	for i := int64(0); i < 10; i++ {
+		randomNumber := rand.Int63n(1<<63 - 1)
+		key = strconv.FormatInt(randomNumber, 10)
+		value := strconv.FormatInt(randomNumber, 10)
+
+		lsm.Put(key, value)
+	}
+	fmt.Printf("Goroutine %d completed\n", current)
 }
 
 func newUser(store *store.Store, i int) {
