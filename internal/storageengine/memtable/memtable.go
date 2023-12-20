@@ -49,6 +49,10 @@ func (m *MemTable) Get(key string) *models.Result {
 
 	val, exists := m.Table[key]
 
+	if !exists {
+		val, exists = m.ReadOnlyTable[key]
+	}
+
 	if exists && val.IsTombstone {
 		return models.NewDeletedResult()
 	}
@@ -84,12 +88,10 @@ func (m *MemTable) ListenSwitchTableEvent(wg *sync.WaitGroup) {
 
 	exitSignal := make(chan os.Signal, 1)
 
-	config := configs.GetStorageEngineConfig()
-
 	for {
 		select {
 		case switchevent := <-m.sharedChannel.SwitchMemtableEvent:
-			if switchevent < 0 || m.Size() < config.MemTableConfig.MaxCapacity || m.ReadOnlyTable != nil {
+			if switchevent < 0 {
 				continue
 			}
 
@@ -103,8 +105,15 @@ func (m *MemTable) ListenSwitchTableEvent(wg *sync.WaitGroup) {
 }
 
 func (m *MemTable) swtichMemtable() {
+
+	config := configs.GetStorageEngineConfig()
+
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
+
+	if m.Size() < config.MemTableConfig.MaxCapacity || m.ReadOnlyTable != nil {
+		return
+	}
 
 	m.ReadOnlyTable = m.Table
 	m.Table = make(map[string]*MemTableEntry)
