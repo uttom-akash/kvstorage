@@ -22,17 +22,24 @@ func main() {
 
 	store.Put("address1", "dhanmandi")
 
-	store.Put("name2", "akash")
+	store.Put("name2", "bkash")
 
 	store.Put("address2", "dhanmandi")
 
-	store.Put("name3", "akash")
+	store.Put("name3", "dkash")
 
 	store.Put("address3", "dhanmandi")
 
 	store.Put("name", "ckash")
 
-	fmt.Println("name: ", store.Get("name")) // Output: one
+	store.Delete("name")
+
+	newUser(store, 10)
+
+	fmt.Println("name1: ", store.Get("name1")) // Output: one
+	fmt.Println("name2: ", store.Get("name2")) // Output: one
+	fmt.Println("name3: ", store.Get("name3")) // Output: one
+	fmt.Println("name: ", store.Get("name"))   // Output: one
 
 }
 
@@ -41,13 +48,16 @@ func generateAndPutData(current int, lsm *store.Store, wg *sync.WaitGroup) {
 
 	var key string
 
-	for i := int64(0); i < 10; i++ {
+	for i := int64(0); i < 100; i++ {
 		randomNumber := rand.Int63n(1<<63 - 1)
 		key = strconv.FormatInt(randomNumber, 10)
 		value := strconv.FormatInt(randomNumber, 10)
 
 		lsm.Put(key, value)
+
+		// fmt.Println("get:", lsm.Get(key))
 	}
+
 	fmt.Printf("Goroutine %d completed\n", current)
 }
 
@@ -60,6 +70,8 @@ func newUser(store *store.Store, i int) {
 
 	for j := 0; j < numGoroutines; j++ {
 		go generateAndPutData(j, store, &wg)
+
+		time.Sleep(3 * time.Second)
 	}
 
 	wg.Wait()
