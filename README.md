@@ -30,4 +30,4 @@
 ```bash
 git clone https://github.com/yourusername/kvstorage.git
 cd kvstorage
-go run
+go run main.go
